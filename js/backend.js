@@ -42,15 +42,19 @@ async function uploadPhoto(dataUrl, name) {
 const queue = () => store.get('queue', []);
 const setQueue = (q) => store.set('queue', q);
 
+const BACKGROUND = new Set(['readings', 'events']); // usage counts, sent in batches
+
 export function pendingCount() {
-  return queue().filter((x) => x.table !== 'readings').length;
+  return queue().filter((x) => !BACKGROUND.has(x.table)).length;
 }
 
 export function enqueue(table, row) {
   const q = queue();
   q.push({ table, row: { ...row, device_id: deviceId(), created_at: new Date().toISOString() } });
-  // keep the queue from growing without limit on phones that never get a backend
-  setQueue(q.filter((x, i) => x.table !== 'readings' || i >= q.length - 200));
+  // keep usage counts from growing without limit on phones that are offline for a long time
+  let bg = q.filter((x) => BACKGROUND.has(x.table)).length;
+  const trimmed = q.filter((x) => !(BACKGROUND.has(x.table) && bg-- > 400));
+  setQueue(trimmed);
   return flush();
 }
 
@@ -62,16 +66,23 @@ export async function flush() {
   try {
     let q = queue();
     while (q.length) {
-      const item = q[0];
-      const row = { ...item.row };
-      if (row.photo_data) {
-        row.photo_url = await uploadPhoto(row.photo_data, `${row.device_id}-${Date.parse(row.created_at)}.jpg`);
-        delete row.photo_data;
+      const first = q[0];
+      let n = 1;
+      if (BACKGROUND.has(first.table)) {
+        // batch consecutive usage rows of the same table into one request
+        while (n < q.length && n < 50 && q[n].table === first.table) n++;
+        await insert(first.table, q.slice(0, n).map((x) => x.row));
+      } else {
+        const row = { ...first.row };
+        if (row.photo_data) {
+          row.photo_url = await uploadPhoto(row.photo_data, `${row.device_id}-${Date.parse(row.created_at)}.jpg`);
+          delete row.photo_data;
+        }
+        await insert(first.table, row);
       }
-      await insert(item.table, row);
-      q = queue().slice(1);
+      q = queue().slice(n);
       setQueue(q);
-      sent++;
+      sent += n;
     }
   } catch (e) {
     console.warn('MosquitoMo: will retry sending later', e);
@@ -79,6 +90,14 @@ export async function flush() {
     flushing = false;
   }
   return { sent, left: pendingCount() };
+}
+
+/** Anonymous usage event: app opened, screen viewed, app installed, place saved, search used. */
+export function track(event, detail = null) {
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const ua = navigator.userAgent;
+  const platform = /android/i.test(ua) ? 'android' : /iphone|ipad|ipod/i.test(ua) ? 'iphone' : 'desktop';
+  enqueue('events', { event, detail: detail == null ? null : String(detail).slice(0, 80), installed: !!standalone, platform });
 }
 
 /** Anonymous count of a reading being checked; location rounded to ~5 km. */

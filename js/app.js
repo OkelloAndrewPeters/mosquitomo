@@ -1,7 +1,7 @@
 import { getReading, getManyReadings, placeName, searchPlaces, nearbyFacilities, locate, store, TOWNS } from './data.js';
 import { headline } from './engine.js';
 import { ADVICE, REPORT_KINDS, LEARN, ACTIONS_WILL_TAKE } from './content.js';
-import { enqueue, flush, hasBackend, pendingCount, logReading } from './backend.js';
+import { enqueue, flush, hasBackend, pendingCount, logReading, track } from './backend.js';
 import { CONFIG } from './config.js';
 
 const $view = document.getElementById('view');
@@ -48,6 +48,7 @@ async function route() {
   const tab = name === 'feedback' || name === 'care' ? 'learn' : name;
   document.querySelectorAll('.tabs a').forEach((a) => { if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   window.scrollTo(0, 0);
+  track('view', name);
   await routes[name](params);
 }
 window.addEventListener('hashchange', route);
@@ -230,6 +231,7 @@ function renderReading({ res, place, lat, lon }) {
       toast('Removed from My places');
     } else {
       places.add({ name: place.name, area: place.area, lat, lon });
+      track('save_place');
       b.setAttribute('aria-pressed', 'true'); b.setAttribute('aria-label', 'Remove from My places');
       toast(`Saved ${place.name} to My places`);
     }
@@ -527,11 +529,11 @@ installBtn.addEventListener('click', async () => {
   if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; installBtn.hidden = true; }
   else if (isIOS) toast('In Safari, tap the Share button, then “Add to Home Screen”.', 6000);
 });
-window.addEventListener('appinstalled', () => { installBtn.hidden = true; toast('MosquitoMo is installed'); });
+window.addEventListener('appinstalled', () => { installBtn.hidden = true; track('install'); toast('MosquitoMo is installed'); });
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-flush();
+track('open');
 route();
