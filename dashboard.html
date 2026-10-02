@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MosquitoMo Pilot Dashboard</title>
+  <meta name="theme-color" content="#1B2340">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <style>
+    :root { --dusk:#1B2340; --ground:#EEF1EC; --paper:#FAFBF8; --ink:#18201C; --ink-2:#4A544F; --line:#D6DCD4; --standard:#2E8B57; --elevated:#E0A100; --high:#C8322B; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:'Atkinson Hyperlegible',system-ui,sans-serif; background:var(--ground); color:var(--ink); }
+    header { background:var(--dusk); color:#fff; padding:18px 24px; display:flex; gap:12px; align-items:center; }
+    header h1 { font-family:'Bricolage Grotesque',sans-serif; font-size:22px; margin:0; }
+    header span { color:#C9D0EA; font-size:15px; }
+    main { max-width:1200px; margin:0 auto; padding:20px 16px 40px; display:grid; gap:16px; }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+    .stat { background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:14px 16px; }
+    .stat b { display:block; font-family:'Bricolage Grotesque',sans-serif; font-size:34px; line-height:1.1; }
+    .stat span { color:var(--ink-2); font-size:14px; }
+    .grid { display:grid; grid-template-columns:3fr 2fr; gap:16px; }
+    @media (max-width:860px){ .grid { grid-template-columns:1fr; } }
+    section { background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:16px; min-width:0; }
+    h2 { font-family:'Bricolage Grotesque',sans-serif; font-size:19px; margin:0 0 10px; }
+    #map { height:460px; border-radius:12px; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { text-align:left; padding:8px 6px; border-top:1px solid var(--line); vertical-align:top; }
+    th { color:var(--ink-2); font-weight:700; border-top:0; }
+    .tag { padding:2px 8px; border-radius:999px; background:var(--line); font-size:12px; font-weight:700; }
+    .note { color:var(--ink-2); font-size:14px; }
+    .scroll { max-height:460px; overflow:auto; }
+    select { font:inherit; padding:4px 6px; border-radius:8px; }
+    .empty { padding:30px; text-align:center; color:var(--ink-2); }
+  </style>
+</head>
+<body>
+  <header><img src="icons/mark.svg" width="34" height="34" alt=""><div><h1>MosquitoMo pilot dashboard</h1><span id="sub">Loading…</span></div></header>
+  <main>
+    <div class="stats" id="stats"></div>
+    <div class="grid">
+      <section><h2>Breeding-site reports and readings</h2><div id="map"></div><p class="note">Dark dots: breeding-site reports. Coloured dots: areas where readings were checked (rounded to about 1 km).</p></section>
+      <section><h2>Latest reports</h2><div class="scroll" id="reports"></div></section>
+    </div>
+    <section><h2>What the numbers mean for the pilot</h2>
+      <p class="note">Understood, advice clarity and usefulness are averages on a 1–5 scale. “Will act” is the share of feedback where the person chose at least one protective action. Recommend score is the Net Promoter Score (−100 to 100). These are the indicators in the NEMA pilot results table.</p>
+    </section>
+  </main>
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script type="module">
+    import { CONFIG } from './js/config.js';
+    const H = { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}` };
+    const KIND = { puddle:'Puddle or pool', drain:'Blocked drain', brick_pit:'Brick pit or quarry', construction:'Construction site water', containers:'Tyres or containers', other:'Something else' };
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    const get = (path) => fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${path}`, { headers: H }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+    const map = L.map('map').setView([1.37, 32.29], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    const sub = document.getElementById('sub');
+    if (!CONFIG.SUPABASE_URL) {
+      sub.textContent = 'Not connected yet. Add your Supabase details to js/config.js (see SETUP.md).';
+    } else {
+      try {
+        const [[s], reports, readings] = await Promise.all([
+          get('pilot_summary?select=*'),
+          get('reports?select=*&order=created_at.desc&limit=500'),
+          get('pilot_readings?select=*').catch(() => []),
+        ]);
+        sub.textContent = `${CONFIG.PILOT_NAME} · updated ${new Date().toLocaleString('en-GB')}`;
+        const stat = (v, l) => `<div class="stat"><b>${v ?? '–'}</b><span>${l}</span></div>`;
+        document.getElementById('stats').innerHTML = [
+          stat(s.devices, 'People using the app (devices)'), stat(s.readings, 'Readings checked'), stat(s.reports, 'Breeding sites reported'),
+          stat(s.feedback_count, 'Feedback forms'), stat(s.avg_understood, 'Understood reading (1–5)'), stat(s.avg_advice_clear, 'Advice clear (1–5)'),
+          stat(s.avg_useful, 'Useful (1–5)'), stat(s.pct_will_act != null ? s.pct_will_act + '%' : null, 'Will take a protective action'), stat(s.nps, 'Recommend score (NPS)'),
+        ].join('');
+        const col = { standard:'#2E8B57', elevated:'#E0A100', high:'#C8322B' };
+        readings.forEach((r) => L.circleMarker([r.lat, r.lon], { radius: Math.min(14, 4 + Math.sqrt(r.n) * 2), color:'#fff', weight:1, fillColor: col[r.level] || '#888', fillOpacity:.75 }).addTo(map).bindPopup(`${r.n} reading(s), latest ${r.score}`));
+        reports.forEach((r) => r.lat && L.circleMarker([r.lat, r.lon], { radius:6, color:'#fff', weight:1.5, fillColor:'#1B2340', fillOpacity:1 }).addTo(map)
+          .bindPopup(`<b>${esc(KIND[r.kind] || r.kind)}</b> · ${esc(r.place_name)}<br>${esc(r.note || '')}<br>${new Date(r.created_at).toLocaleString('en-GB')}${r.photo_url ? `<br><img src="${esc(r.photo_url)}" style="width:200px;border-radius:8px;margin-top:6px">` : ''}`));
+        document.getElementById('reports').innerHTML = reports.length ? `<table><tr><th>When</th><th>What</th><th>Where</th><th>Photo</th></tr>${reports.map((r) => `<tr><td>${new Date(r.created_at).toLocaleDateString('en-GB')}</td><td>${esc(KIND[r.kind] || r.kind)}<br><span class="note">${esc(r.note || '')}</span></td><td>${esc(r.place_name || '')}</td><td>${r.photo_url ? `<a href="${esc(r.photo_url)}" target="_blank">View</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No reports yet.</div>';
+      } catch (e) {
+        sub.textContent = 'Could not load pilot data. Check the Supabase details in js/config.js and that schema.sql has been run.';
+      }
+    }
+  </script>
+</body>
+</html>
