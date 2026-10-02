@@ -33,12 +33,31 @@
     .note { color:var(--ink-2); font-size:14px; }
     .scroll { max-height:460px; overflow:auto; }
     select { font:inherit; padding:4px 6px; border-radius:8px; }
+    h3.group { font-family:'Bricolage Grotesque',sans-serif; font-size:17px; margin:6px 0 0; color:var(--ink-2); font-weight:700; }
+    .chart { position:relative; }
+    .chart svg { display:block; width:100%; height:auto; }
+    .legend { display:flex; gap:16px; font-size:14px; color:var(--ink-2); margin-bottom:8px; }
+    .sw { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-1px; margin-right:6px; }
+    .tip { position:absolute; pointer-events:none; background:var(--ink); color:#fff; font-size:13px; padding:6px 10px; border-radius:8px; white-space:nowrap; transform:translate(-50%,-110%); opacity:0; transition:opacity .1s; }
+    .bars rect.hit { fill:transparent; cursor:default; }
+    .screens td:nth-child(n+2), .screens th:nth-child(n+2) { text-align:right; font-variant-numeric:tabular-nums; }
     .empty { padding:30px; text-align:center; color:var(--ink-2); }
   </style>
 </head>
 <body>
   <header><img src="icons/mark.svg" width="34" height="34" alt=""><div><h1>MosquitoMo pilot dashboard</h1><span id="sub">Loading…</span></div></header>
   <main>
+    <h3 class="group">Users</h3>
+    <div class="stats" id="ustats"></div>
+    <div class="grid">
+      <section><h2>People using MosquitoMo each day</h2>
+        <div class="legend"><span><i class="sw" style="background:#8E9BD0"></i>New users</span><span><i class="sw" style="background:#1B2340"></i>Returning users</span></div>
+        <div class="chart" id="daily"><div class="empty">No usage yet.</div></div>
+        <p class="note">A user is one phone or browser. Days are in Uganda time.</p>
+      </section>
+      <section><h2>Screens people open</h2><div id="screens"><div class="empty">No usage yet.</div></div></section>
+    </div>
+    <h3 class="group">Pilot results</h3>
     <div class="stats" id="stats"></div>
     <div class="grid">
       <section><h2>Breeding-site reports and readings</h2><div id="map"></div><p class="note">Dark dots: breeding-site reports. Coloured dots: areas where readings were checked (rounded to about 1 km).</p></section>
@@ -55,6 +74,57 @@
     const KIND = { puddle:'Puddle or pool', drain:'Blocked drain', brick_pit:'Brick pit or quarry', construction:'Construction site water', containers:'Tyres or containers', other:'Something else' };
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
     const get = (path) => fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${path}`, { headers: H }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+    const SCREEN = { here:'Here (my reading)', places:'Places', map:'Map', report:'Report', learn:'Learn', feedback:'Feedback', care:'Fever and care' };
+    function renderUsers(u, daily, screens) {
+      const stat = (v, l) => `<div class="stat"><b>${v ?? '–'}</b><span>${l}</span></div>`;
+      document.getElementById('ustats').innerHTML = [
+        stat(u.total_users, 'Total users'), stat(u.active_24h, 'Active in the last 24 hours'), stat(u.active_7d, 'Active in the last 7 days'),
+        stat(u.pct_returned != null ? u.pct_returned + '%' : null, `Came back on another day (${u.returned_users ?? 0})`),
+        stat(u.installed_users, 'Installed the app'), stat(u.app_opens, 'App opens'),
+        stat(`${u.android_users ?? 0} / ${u.iphone_users ?? 0}`, 'Android / iPhone users'),
+      ].join('');
+      if (daily.length) {
+        // fill missing days so the time axis is honest
+        const byDay = Object.fromEntries(daily.map((d) => [d.day, d]));
+        const start = new Date(daily[0].day), end = new Date(daily[daily.length - 1].day);
+        const days = [];
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const k = d.toISOString().slice(0, 10);
+          days.push(byDay[k] || { day: k, active: 0, new_users: 0, returning_users: 0 });
+        }
+        const W = 640, H = 220, padL = 34, padB = 26, padT = 10;
+        const max = Math.max(4, ...days.map((d) => d.active));
+        const nice = Math.ceil(max / 4) * 4;
+        const step = (W - padL) / days.length, bw = Math.max(4, Math.min(28, step - 4));
+        const y = (v) => H - padB - (v / nice) * (H - padB - padT);
+        const grid = [0, nice / 2, nice].map((v) => `<line x1="${padL}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#D6DCD4"/><text x="${padL - 6}" y="${y(v) + 4}" font-size="12" fill="#4A544F" text-anchor="end">${v}</text>`).join('');
+        const labelEvery = Math.ceil(days.length / 8);
+        const bars = days.map((d, i) => {
+          const x = padL + i * step + (step - bw) / 2;
+          const yRet = y(d.returning_users), yAll = y(d.active);
+          const gap = d.returning_users && d.new_users ? 2 : 0;
+          const lab = new Date(d.day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+          return `${d.returning_users ? `<rect x="${x}" y="${yRet}" width="${bw}" height="${H - padB - yRet}" rx="3" fill="#1B2340"/>` : ''}
+            ${d.new_users ? `<rect x="${x}" y="${yAll}" width="${bw}" height="${Math.max(0, yRet - yAll - gap)}" rx="3" fill="#8E9BD0"/>` : ''}
+            ${i % labelEvery === 0 ? `<text x="${x + bw / 2}" y="${H - 8}" font-size="12" fill="#4A544F" text-anchor="middle">${lab}</text>` : ''}
+            <rect class="hit" x="${padL + i * step}" y="${padT}" width="${step}" height="${H - padB - padT}" data-tip="${lab}: ${d.active} users (${d.new_users} new, ${d.returning_users} returning)"/>`;
+        }).join('');
+        const el = document.getElementById('daily');
+        el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily users, new and returning">${grid}<g class="bars">${bars}</g></svg><div class="tip"></div>
+          <details style="margin-top:8px"><summary class="note">Show as table</summary><table><tr><th>Day</th><th>Users</th><th>New</th><th>Returning</th></tr>${days.map((d) => `<tr><td>${d.day}</td><td>${d.active}</td><td>${d.new_users}</td><td>${d.returning_users}</td></tr>`).join('')}</table></details>`;
+        const tip = el.querySelector('.tip');
+        el.querySelectorAll('rect.hit').forEach((r) => {
+          r.addEventListener('mouseenter', () => {
+            const box = r.getBoundingClientRect(), host = el.getBoundingClientRect();
+            tip.textContent = r.dataset.tip; tip.style.left = box.left - host.left + box.width / 2 + 'px'; tip.style.top = '40px'; tip.style.opacity = 1;
+          });
+          r.addEventListener('mouseleave', () => (tip.style.opacity = 0));
+        });
+      }
+      if (screens.length) {
+        document.getElementById('screens').innerHTML = `<table class="screens"><tr><th>Screen</th><th>Views</th><th>Users</th></tr>${screens.map((x) => `<tr><td>${esc(SCREEN[x.screen] || x.screen)}</td><td>${x.views}</td><td>${x.users}</td></tr>`).join('')}</table>`;
+      }
+    }
     const map = L.map('map').setView([1.37, 32.29], 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
     const sub = document.getElementById('sub');
@@ -62,6 +132,12 @@
       sub.textContent = 'Not connected yet. Add your Supabase details to js/config.js (see SETUP.md).';
     } else {
       try {
+        const [[u], daily, screens] = await Promise.all([
+          get('user_summary?select=*').catch(() => [{}]),
+          get('daily_usage?select=*').catch(() => []),
+          get('screen_usage?select=*').catch(() => []),
+        ]);
+        renderUsers(u || {}, daily, screens);
         const [[s], reports, readings] = await Promise.all([
           get('pilot_summary?select=*'),
           get('reports?select=*&order=created_at.desc&limit=500'),
@@ -70,7 +146,7 @@
         sub.textContent = `${CONFIG.PILOT_NAME} · updated ${new Date().toLocaleString('en-GB')}`;
         const stat = (v, l) => `<div class="stat"><b>${v ?? '–'}</b><span>${l}</span></div>`;
         document.getElementById('stats').innerHTML = [
-          stat(s.devices, 'People using the app (devices)'), stat(s.readings, 'Readings checked'), stat(s.reports, 'Breeding sites reported'),
+          stat(s.readings, 'Readings checked'), stat(s.reports, 'Breeding sites reported'),
           stat(s.feedback_count, 'Feedback forms'), stat(s.avg_understood, 'Understood reading (1–5)'), stat(s.avg_advice_clear, 'Advice clear (1–5)'),
           stat(s.avg_useful, 'Useful (1–5)'), stat(s.pct_will_act != null ? s.pct_will_act + '%' : null, 'Will take a protective action'), stat(s.nps, 'Recommend score (NPS)'),
         ].join('');

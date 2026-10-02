@@ -1,5 +1,5 @@
 // MosquitoMo service worker: the app opens offline; readings are cached by the app itself.
-const VERSION = 'mm-v2';
+const VERSION = 'mm-v3';
 const SHELL = [
   './', './index.html', './css/app.css', './manifest.webmanifest',
   './js/app.js', './js/engine.js', './js/data.js', './js/content.js', './js/backend.js', './js/config.js',

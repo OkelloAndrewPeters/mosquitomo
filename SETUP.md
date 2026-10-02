@@ -9,7 +9,10 @@ A web app that installs like a normal app on Android and iPhone. No app store an
 - **Report**: report a breeding site with a photo, GPS location and a note. Works offline and sends later.
 - **Learn**: short lessons, how the index works, and fever and care with nearby health facilities.
 - **Feedback**: a 7-question pilot survey.
-- **dashboard.html**: pilot numbers, a map of reports and readings, and the latest reports.
+- **dashboard.html**: users (total, active today and this week, new vs returning each day, installs, Android vs iPhone, screens used), pilot results, a map of reports and readings, and the latest reports.
+
+## What is tracked, and what isn't
+Each phone gets a random ID the first time it opens the app. MosquitoMo records when the app is opened, which screens are viewed, whether it was opened as an installed app, the platform (Android, iPhone or desktop), readings rounded to about 1 km, reports and feedback. It never records names, phone numbers or exact home locations. Tell pilot users this, for example on the poster.
 
 Live data comes from Open-Meteo (rain, temperature, humidity, 92 days of history plus a 16-day forecast, and elevation) and from OpenStreetMap (place names and health facilities). These are free and need no keys. Open-Meteo is free for non-commercial use (up to 10,000 calls a day), which is plenty for a pilot.
 
