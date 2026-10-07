@@ -1,4 +1,4 @@
-import { getReading, getManyReadings, placeName, searchPlaces, nearbyFacilities, locate, store, TOWNS } from './data.js';
+import { getReading, getManyReadings, placeName, searchPlaces, nearbyFacilities, locate, store, TOWNS, syncPack, packInfo, isOffline } from './data.js';
 import { headline } from './engine.js';
 import { ADVICE, REPORT_KINDS, LEARN, ACTIONS_WILL_TAKE } from './content.js';
 import { enqueue, flush, hasBackend, pendingCount, logReading, track } from './backend.js';
@@ -117,8 +117,10 @@ async function showReading({ lat, lon, name, area, source, refreshing }) {
     if (my !== readingToken) return;
     $view.innerHTML = `
     <section class="state">
-      <h2>Could not get today's weather data</h2>
-      <p class="muted">MosquitoMo needs an internet connection the first time you check a place. Check your data or Wi-Fi and try again.</p>
+      <h2>${isOffline() ? 'This place is not saved on your phone yet' : "Could not get today's weather data"}</h2>
+      <p class="muted">${isOffline()
+        ? `You are offline. ${packInfo().count ? `Readings for ${packInfo().count} towns are saved on this phone: <a href="#places">search for the nearest town</a>.` : 'Open MosquitoMo once with internet to save readings for towns across Uganda.'}`
+        : 'Check your data or Wi-Fi and try again.'}</p>
       <button class="btn block" id="retry">Try again</button>
     </section>`;
     document.getElementById('retry').onclick = () => showReading({ lat, lon, name, area, source });
@@ -153,6 +155,15 @@ function stripSVG(r) {
   </svg>`;
 }
 
+// "Offline" is only said when the phone really has no connection.
+function updatedLine(res) {
+  const near = res.near ? ` Using the nearest saved reading (${esc(res.near.name)}, about ${res.near.km} km away).` : '';
+  const left = res.daysLeft != null && isOffline() ? ` Good for ${res.daysLeft} more day${res.daysLeft === 1 ? '' : 's'} without internet.` : '';
+  if (res.fromCache && isOffline()) return `<span class="off">Offline.</span> Weather saved ${ago(res.at)}, risk worked out for today.${left}${near}`;
+  if (res.stale) return `Could not refresh just now. Weather saved ${ago(res.at)}.${near}`;
+  return `Updated ${ago(res.at)}`;
+}
+
 function renderReading({ res, place, lat, lon }) {
   const r = res.reading;
   const lvl = r.level.key;
@@ -185,7 +196,7 @@ function renderReading({ res, place, lat, lon }) {
       ${stripSVG(r)}
       <div class="legend"><span><b>Rain</b>, past 8 weeks</span><span><b>Risk</b>, next 8 weeks</span></div>
     </div>
-    <p class="updated">${res.stale ? 'Offline. Showing the reading from ' : 'Updated '}${ago(res.at)}${res.elevation != null ? ` · ${res.elevation} m above sea level` : ''}</p>
+    <p class="updated">${updatedLine(res)}${res.elevation != null ? ` · ${res.elevation} m above sea level` : ''}</p>
   </section>
 
   <section class="panel" data-level="${lvl}">
@@ -239,6 +250,12 @@ function renderReading({ res, place, lat, lon }) {
 }
 
 // ---------- PLACES ----------
+function packLine() {
+  const p = packInfo();
+  if (!p.count) return isOffline() ? 'You are offline. Town search works after MosquitoMo has been opened once with internet.' : '';
+  return `${p.count} towns saved on this phone for use without internet${isOffline() ? '. You are offline, so search uses saved towns.' : '.'}`;
+}
+
 function placeHref(p, src = 'place') {
   return `#here?lat=${p.lat}&lon=${p.lon}&name=${encodeURIComponent(p.name)}&area=${encodeURIComponent(p.area || '')}&src=${src}`;
 }
@@ -251,6 +268,7 @@ async function viewPlaces() {
     <label class="sr-only" for="q">Search a village, town, school or park</label>
     <input id="q" type="search" placeholder="Village, town, school, or GPS like 0.38, 32.56" autocomplete="off" enterkeyhint="search">
   </div>
+  <p class="small muted" id="packLine" style="margin-top:8px">${packLine()}</p>
   <ul class="rows" id="results" hidden></ul>
   <h3 style="margin-top:22px">My places</h3>
   ${saved.length ? `<ul class="rows" id="saved">${saved.map((p, i) => `
@@ -263,7 +281,7 @@ async function viewPlaces() {
   q.addEventListener('input', () => {
     clearTimeout(t);
     const v = q.value.trim();
-    if (v.length < 3) { results.hidden = true; return; }
+    if (v.length < 2) { results.hidden = true; return; }
     t = setTimeout(async () => {
       results.hidden = false;
       results.innerHTML = `<li class="empty">Searching…</li>`;
@@ -272,11 +290,11 @@ async function viewPlaces() {
         if (q.value.trim() !== v) return;
         results.innerHTML = list.length
           ? list.map((p) => `<li><a class="row" href="${placeHref(p, 'search')}"><span><span class="t">${esc(p.name)}</span><br><span class="s">${esc(p.area)}</span></span><span aria-hidden="true">›</span></a></li>`).join('')
-          : `<li class="empty">No places in Uganda match “${esc(v)}”. Try the parish, town or district name, or GPS coordinates inside Uganda.</li>`;
+          : `<li class="empty">${isOffline() ? `No saved town matches “${esc(v)}”. Without internet, search the nearest district town instead.` : `No places in Uganda match “${esc(v)}”. Try the parish, town or district name, or GPS coordinates inside Uganda.`}</li>`;
       } catch {
-        results.innerHTML = `<li class="empty">Search needs an internet connection. Check your data and try again.</li>`;
+        results.innerHTML = `<li class="empty">Could not search right now. Try a district town name, or check your data.</li>`;
       }
-    }, 450);
+    }, isOffline() ? 120 : 450);
   });
   saved.forEach(async (p, i) => {
     try {
@@ -307,6 +325,7 @@ async function viewMap() {
   <p class="small muted">Readings for ${TOWNS.length} towns. Tap anywhere on the map to check that spot.</p>
   <div class="map-wrap"><div id="map" role="region" aria-label="Map of MosquitoMo readings"></div></div>
   <div class="map-legend"><span><i class="dot" style="background:var(--standard)"></i>Standard</span><span><i class="dot" style="background:var(--elevated)"></i>Elevated</span><span><i class="dot" style="background:var(--high)"></i>High</span><span><i class="dot" style="background:var(--dusk)"></i>Breeding-site report</span></div>`;
+  if (isOffline()) document.querySelector('.map-wrap').insertAdjacentHTML('beforebegin', '<p class="small muted">You are offline: the map background needs internet, but town readings are from data saved on this phone.</p>');
   try { await loadLeaflet(); } catch {
     document.getElementById('map').innerHTML = `<div class="state"><p class="muted">The map needs an internet connection.</p></div>`;
     return;
@@ -378,9 +397,10 @@ async function viewReport() {
     </fieldset>
     <div>
       <span class="q" style="font-weight:700;display:block;margin-bottom:6px">Photo (optional)</span>
-      <label class="photo-drop" id="drop"><span id="dropText">Tap to take a photo</span>
+      <label class="photo-drop" id="drop"><span id="dropText">Tap to take a photo. The AI on your phone will check it, even without internet.</span>
         <input type="file" accept="image/*" capture="environment" id="photo" aria-label="Take or choose a photo">
       </label>
+      <div id="ai" aria-live="polite"></div>
     </div>
     <div>
       <span class="q" style="font-weight:700;display:block;margin-bottom:6px">Location</span>
@@ -396,7 +416,7 @@ async function viewReport() {
   ${mine.length ? `<ul class="rows">${mine.slice().reverse().map((r) => `<li class="row" style="cursor:default"><span><span class="t">${esc(REPORT_KINDS.find((k) => k.key === r.kind)?.label)}</span><br><span class="s">${esc(r.place || '')} · ${new Date(r.at).toLocaleDateString('en-GB')}</span></span><span class="status-tag ${r.sent ? 'sent' : ''}">${r.sent ? 'Sent' : 'Waiting to send'}</span></li>`).join('')}</ul>`
     : `<div class="rows empty">Reports you send will appear here.</div>`}
   `;
-  let photo = null, pos = null, pname = '';
+  let photo = null, pos = null, pname = '', aiNote = null;
   const gps = document.getElementById('gps');
   const send = document.getElementById('send');
   locate().then(async (p) => {
@@ -420,14 +440,16 @@ async function viewReport() {
       const im = document.createElement('img'); im.src = photo; im.alt = 'Your photo';
       d.prepend(im);
       document.getElementById('dropText').textContent = '';
-    } catch { toast('That photo could not be read. Try another.'); }
+    } catch { toast('That photo could not be read. Try another.'); return; }
+    aiNote = await aiCheck(f);
   });
   document.getElementById('rep').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!pos) return;
     send.disabled = true;
     const kind = new FormData(e.target).get('kind');
-    const row = { kind, note: document.getElementById('note').value.trim() || null, lat: +pos.lat.toFixed(5), lon: +pos.lon.toFixed(5), accuracy_m: Math.round(pos.acc), place_name: pname, photo_data: photo };
+    const userNote = document.getElementById('note').value.trim();
+    const row = { kind, note: [aiNote, userNote].filter(Boolean).join(' | ') || null, lat: +pos.lat.toFixed(5), lon: +pos.lon.toFixed(5), accuracy_m: Math.round(pos.acc), place_name: pname, photo_data: photo };
     const list = store.get('myReports', []);
     list.push({ kind, place: pname, at: Date.now(), sent: false });
     store.set('myReports', list);
@@ -438,6 +460,44 @@ async function viewReport() {
     } else toast('Report saved. It will send when you are online.');
     viewReport();
   });
+}
+
+// ---------- AI photo check (SiteNet, runs on the phone) ----------
+const AI = {
+  no_site: { label: 'No breeding site seen', kind: null, fix: 'Good. Keep checking after rain: water that stays for a week can breed mosquitoes.' },
+  puddle: { label: 'Puddle or pool', kind: 'puddle', fix: 'Fill it with soil or sand, or dig a channel so the water drains away.' },
+  drain: { label: 'Blocked drain', kind: 'drain', fix: 'Remove rubbish so water flows. Ask your LC to organise drain clearing.' },
+  container: { label: 'Tyres or containers', kind: 'containers', fix: 'Empty and turn over containers. Store tyres under cover or puncture them.' },
+  pit: { label: 'Pit holding water', kind: 'brick_pit', fix: 'Fill or drain the pit. Report brick and construction pits to local leaders.' },
+  wetland: { label: 'Swamp or wetland edge', kind: 'wetland', fix: 'Do not dig new pools near homes. Sleep under a net and report breeding near homes.' },
+};
+
+async function aiCheck(file) {
+  const box = document.getElementById('ai');
+  box.innerHTML = `<div class="ai"><p class="small muted">Checking the photo on your phone…</p></div>`;
+  try {
+    const { classify } = await import('./sitenet.js');
+    const { top, ranked, ms } = await classify(file);
+    const info = AI[top.cls];
+    const unsure = top.p < 0.5;
+    const site = top.cls !== 'no_site';
+    box.innerHTML = `
+    <div class="ai ${unsure ? '' : site ? 'site' : 'clear'}">
+      <span class="verdict">${unsure ? 'Not sure' : site ? 'Likely breeding site' : 'No breeding site seen'}</span>
+      <b class="cls">${unsure ? 'Best guess: ' : ''}${esc(info.label)} (${Math.round(top.p * 100)}%)</b>
+      ${unsure ? `<p class="small">The AI is not sure. Choose what you saw below; a health worker will check the photo.</p>` : `<p class="fix">${esc(info.fix)}</p>`}
+      <p class="small muted" style="margin-top:6px">Checked on this phone in ${ms} ms. The photo was not uploaded for this check. Next guess: ${esc(AI[ranked[1].cls].label)} (${Math.round(ranked[1].p * 100)}%).</p>
+    </div>`;
+    if (!unsure && info.kind) {
+      const r = document.querySelector(`input[name="kind"][value="${info.kind}"]`);
+      if (r) r.checked = true;
+    }
+    track('ai_check', top.cls);
+    return `AI check: ${info.label} ${Math.round(top.p * 100)}%${unsure ? ' (unsure)' : ''}`;
+  } catch {
+    box.innerHTML = `<div class="ai"><p class="small muted">The photo check could not run on this phone. You can still send the report.</p></div>`;
+    return null;
+  }
 }
 
 // ---------- CARE ----------
@@ -470,6 +530,7 @@ function viewLearn() {
     <p class="small">MosquitoMo is being tested in October 2026 by a Makerere University student team. Tell us what worked and what did not.</p>
     <a class="btn block" href="#feedback">Give feedback</a>
   </section>
+  <p class="small muted">Photo check: a small AI model (SiteNet, 4.4 MB) runs on your phone and works without internet. It suggests what kind of water site a photo shows; you decide what to report.</p>
   <p class="small muted">Weather data by Open-Meteo.com (CC BY 4.0). Maps and places © OpenStreetMap contributors. MosquitoMo gives general information and is not medical advice.</p>
   <p class="small muted">${pendingCount() ? `${pendingCount()} item(s) waiting to send.` : ''}</p>`;
 }
@@ -532,8 +593,31 @@ installBtn.addEventListener('click', async () => {
 window.addEventListener('appinstalled', () => { installBtn.hidden = true; track('install'); toast('MosquitoMo is installed'); });
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Check for a new version each time the app opens (and every 30 minutes); reload once when it takes over.
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    reg.update().catch(() => {});
+    setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+  }).catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true; location.reload();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') navigator.serviceWorker.getRegistration().then((r) => r && r.update().catch(() => {}));
+  });
 }
+
+// Offline badge: shown only while the phone has no connection.
+const net = document.getElementById('net');
+const showNet = () => { net.hidden = !isOffline(); };
+window.addEventListener('online', () => { showNet(); syncPack().catch(() => {}); });
+window.addEventListener('offline', showNet);
+showNet();
+
+// Save readings for towns across Uganda in the background, so the app works without internet later.
+setTimeout(() => syncPack().then(() => { const el = document.getElementById('packLine'); if (el) el.textContent = packLine(); }).catch(() => {}), 2500);
 
 track('open');
 route();

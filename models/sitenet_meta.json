@@ -1,0 +1,280 @@
+{
+  "model": "SiteNet (mobilenetv3_large_100 student distilled from OpenCLIP ViT-B/32 laion2b_s34b_b79k)",
+  "trained_on": "2026-10-03 19:59 UTC",
+  "shipped": "int8",
+  "classes": [
+    "no_site",
+    "puddle",
+    "drain",
+    "container",
+    "pit",
+    "wetland"
+  ],
+  "labels": {
+    "no_site": "No breeding site visible",
+    "puddle": "Puddle, pothole or tyre ruts",
+    "drain": "Blocked drain or ditch",
+    "container": "Tyres or containers holding water",
+    "pit": "Brick, quarry or construction pit",
+    "wetland": "Swamp edge or rice paddy"
+  },
+  "input": {
+    "size": 224,
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "layout": "NCHW",
+    "resize": 256,
+    "center_crop": 224
+  },
+  "data": {
+    "sources": "Wikimedia Commons (open licences, per-image record in commons_manifest.csv) + Bing image search results (unknown licences, used only for training, not redistributed)",
+    "unique_images": 4481,
+    "kept_after_teacher_cleaning": 3291,
+    "relabeled": 1167,
+    "dropped": 1190,
+    "per_class": {
+      "no_site": 776,
+      "puddle": 648,
+      "drain": 238,
+      "container": 414,
+      "pit": 547,
+      "wetland": 668
+    },
+    "split": {
+      "train": 2303,
+      "val": 494,
+      "test": 494
+    }
+  },
+  "training": {
+    "epochs": 24,
+    "temperature": 2.0,
+    "alpha_kd": 0.5,
+    "optimizer": "AdamW + OneCycle",
+    "history": [
+      [
+        0,
+        4.691068370001656,
+        0.4352226720647773,
+        0.4352226720647773
+      ],
+      [
+        1,
+        2.595162432534354,
+        0.5789473684210527,
+        0.5789473684210527
+      ],
+      [
+        2,
+        1.8978363071169173,
+        0.6052631578947368,
+        0.6052631578947368
+      ],
+      [
+        3,
+        1.368779080254691,
+        0.6477732793522267,
+        0.6477732793522267
+      ],
+      [
+        4,
+        1.1763721091406687,
+        0.6578947368421053,
+        0.6578947368421053
+      ],
+      [
+        5,
+        0.9885735103062221,
+        0.6963562753036437,
+        0.6963562753036437
+      ],
+      [
+        6,
+        0.9496735998562404,
+        0.6923076923076923,
+        0.6923076923076923
+      ],
+      [
+        7,
+        0.8352633953094483,
+        0.7024291497975709,
+        0.7024291497975709
+      ],
+      [
+        8,
+        0.7827306968825204,
+        0.6983805668016194,
+        0.6983805668016194
+      ],
+      [
+        9,
+        0.7345774701663426,
+        0.7388663967611336,
+        0.7388663967611336
+      ],
+      [
+        10,
+        0.7045499052320208,
+        0.728744939271255,
+        0.728744939271255
+      ],
+      [
+        11,
+        0.6604738524981908,
+        0.7327935222672065,
+        0.7327935222672065
+      ],
+      [
+        12,
+        0.6464570845876422,
+        0.7469635627530364,
+        0.7469635627530364
+      ],
+      [
+        13,
+        0.6102899551391602,
+        0.7348178137651822,
+        0.7348178137651822
+      ],
+      [
+        14,
+        0.6139547671590533,
+        0.7327935222672065,
+        0.7327935222672065
+      ],
+      [
+        15,
+        0.584143488747733,
+        0.7368421052631579,
+        0.7368421052631579
+      ],
+      [
+        16,
+        0.5681696048804692,
+        0.7388663967611336,
+        0.7388663967611336
+      ],
+      [
+        17,
+        0.5618891877787454,
+        0.7408906882591093,
+        0.7408906882591093
+      ],
+      [
+        18,
+        0.5560075989791325,
+        0.7348178137651822,
+        0.7348178137651822
+      ],
+      [
+        19,
+        0.5410158174378531,
+        0.7449392712550608,
+        0.7449392712550608
+      ],
+      [
+        20,
+        0.5443734909806933,
+        0.742914979757085,
+        0.742914979757085
+      ],
+      [
+        21,
+        0.5261814253670829,
+        0.7408906882591093,
+        0.7408906882591093
+      ],
+      [
+        22,
+        0.540127512386867,
+        0.7408906882591093,
+        0.7408906882591093
+      ],
+      [
+        23,
+        0.5291058131626674,
+        0.7368421052631579,
+        0.7368421052631579
+      ]
+    ]
+  },
+  "test": {
+    "accuracy": 0.7206,
+    "macro_f1": 0.7082,
+    "teacher_agreement": 0.7206,
+    "site_present_vs_absent_accuracy": 0.8785,
+    "per_class": {
+      "no_site": {
+        "precision": 0.736,
+        "recall": 0.761,
+        "f1-score": 0.748,
+        "support": 117.0
+      },
+      "puddle": {
+        "precision": 0.689,
+        "recall": 0.745,
+        "f1-score": 0.716,
+        "support": 98.0
+      },
+      "drain": {
+        "precision": 0.649,
+        "recall": 0.686,
+        "f1-score": 0.667,
+        "support": 35.0
+      },
+      "container": {
+        "precision": 0.755,
+        "recall": 0.645,
+        "f1-score": 0.696,
+        "support": 62.0
+      },
+      "pit": {
+        "precision": 0.649,
+        "recall": 0.585,
+        "f1-score": 0.615,
+        "support": 82.0
+      },
+      "wetland": {
+        "precision": 0.796,
+        "recall": 0.82,
+        "f1-score": 0.808,
+        "support": 100.0
+      }
+    }
+  },
+  "onnx": {
+    "fp32": {
+      "accuracy": 0.7206,
+      "macro_f1": 0.7082,
+      "median_ms_colab_cpu": 6.7,
+      "size_mb": 16.83
+    },
+    "int8": {
+      "accuracy": 0.7227,
+      "macro_f1": 0.7075,
+      "median_ms_colab_cpu": 19.57,
+      "size_mb": 4.4,
+      "top1_agreement_with_fp32": 0.9737,
+      "method": "weight-only per-channel INT8 + DequantizeLinear, FP32 compute",
+      "gzip_mb": 3.92
+    }
+  },
+  "caveats": "Images are open web images labelled by a zero-shot teacher, so test labels share the teacher's biases. Field validation with photos from Ugandan pilot users is the next step.",
+  "alternatives": {
+    "v1_small": {
+      "model": "mobilenetv3_small_100 (1.5M params)",
+      "test_accuracy": 0.696,
+      "site_vs_no_site": 0.874,
+      "int8_mb": 1.65,
+      "note": "smaller and faster; see training/results/v1_small"
+    }
+  }
+}

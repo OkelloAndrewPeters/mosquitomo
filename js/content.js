@@ -37,6 +37,7 @@ export const REPORT_KINDS = [
   { key: 'brick_pit', label: 'Brick pit or quarry' },
   { key: 'construction', label: 'Construction site water' },
   { key: 'containers', label: 'Tyres or containers' },
+  { key: 'wetland', label: 'Swamp or wetland edge' },
   { key: 'other', label: 'Something else' },
 ];
 

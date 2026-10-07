@@ -1,6 +1,10 @@
 // Live data: Open-Meteo (weather + elevation), OpenStreetMap Nominatim (place names),
 // Overpass (health facilities). All free, keyless and callable from the browser.
 import { computeReading } from './engine.js';
+import { PLACES, searchLocal } from './places-ug.js';
+
+export const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+const todayUG = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Kampala' });
 
 const WX = 'https://api.open-meteo.com/v1/forecast';
 const ELEV = 'https://api.open-meteo.com/v1/elevation';
@@ -85,25 +89,92 @@ async function fetchTPI(lat, lon) {
   return { elevation: Math.round(e[0]), tpi: Math.round(e[0] - ring) };
 }
 
-/** Reading for a point. Returns cached copy when offline. */
+/** Re-score a saved reading for today, so offline readings stay current for up to 16 days. */
+function refresh(saved) {
+  if (!saved.series) return { ...saved, daysOld: null };
+  const i = saved.series.dates.indexOf(todayUG());
+  if (i < 0) return { ...saved, expired: true };
+  const series = { ...saved.series, todayIndex: i };
+  return { ...saved, reading: computeReading(series, saved.tpi), daysLeft: saved.series.dates.length - 1 - i };
+}
+
+/** All readings saved on the phone: [{lat, lon, at, ...}] */
+function savedReadings() {
+  const out = [];
+  try {
+    for (let n = 0; n < localStorage.length; n++) {
+      const k = localStorage.key(n);
+      if (!k || !k.startsWith('mm:r:')) continue;
+      const v = JSON.parse(localStorage.getItem(k));
+      if (v && v.series) out.push(v);
+    }
+  } catch { /* storage blocked */ }
+  return out;
+}
+
+/** Nearest saved reading within `km`, with the name of the nearest known town. */
+export function nearestSaved(lat, lon, km = 40) {
+  let best = null, bd = Infinity;
+  for (const r of savedReadings()) { const d = distKm(lat, lon, r.lat, r.lon); if (d < bd) { bd = d; best = r; } }
+  return best && bd <= km ? { ...best, km: bd } : null;
+}
+
+function nearestPlace(lat, lon) {
+  let best = null, bd = Infinity;
+  for (const p of PLACES) { const d = distKm(lat, lon, p.lat, p.lon); if (d < bd) { bd = d; best = p; } }
+  return best ? { ...best, km: bd } : null;
+}
+
+/** Reading for a point. Falls back to the saved copy, then to the nearest saved place, when the network fails. */
 export async function getReading(lat, lon, { force = false } = {}) {
   const k = 'r:' + key(lat, lon);
   const cached = store.get(k);
-  if (!force && cached && Date.now() - cached.at < TTL) return { ...cached, fromCache: true };
+  if (!force && cached && Date.now() - cached.at < TTL) return { ...refresh(cached), fromCache: true };
   try {
+    if (isOffline()) throw new Error('offline');
     const [wx, terrain] = await Promise.all([
       fetchWeather([lat], [lon]),
       fetchTPI(lat, lon).catch(() => ({ elevation: null, tpi: null })),
     ]);
-    const reading = computeReading(toSeries(wx), terrain.tpi);
-    const out = { at: Date.now(), lat, lon, elevation: terrain.elevation, tpi: terrain.tpi, reading };
+    const series = toSeries(wx);
+    const reading = computeReading(series, terrain.tpi);
+    const out = { at: Date.now(), lat, lon, elevation: terrain.elevation, tpi: terrain.tpi, reading, series };
     store.set(k, out);
     return out;
   } catch (e) {
-    if (cached) return { ...cached, fromCache: true, stale: true };
+    if (cached) return { ...refresh(cached), fromCache: true, stale: true };
+    const near = nearestSaved(lat, lon);
+    if (near) {
+      const np = nearestPlace(near.lat, near.lon);
+      return { ...refresh(near), fromCache: true, stale: true, near: { name: np && np.km < 5 ? np.name : 'a saved place', km: Math.round(near.km) } };
+    }
     throw e;
   }
 }
+
+/** Save readings for the towns in the offline pack, so readings work anywhere with no internet. */
+export async function syncPack({ force = false } = {}) {
+  const last = store.get('packAt', 0);
+  if (isOffline() || (!force && Date.now() - last < 12 * 3600 * 1000)) return { count: store.get('packCount', 0), at: last };
+  let count = 0;
+  for (let i = 0; i < PLACES.length; i += 50) {
+    const chunk = PLACES.slice(i, i + 50);
+    const d = await fetchWeather(chunk.map((p) => p.lat), chunk.map((p) => p.lon));
+    const arr = Array.isArray(d) ? d : [d];
+    arr.forEach((one, j) => {
+      const p = chunk[j];
+      const k = 'r:' + key(p.lat, p.lon);
+      const prev = store.get(k);
+      if (prev && prev.tpi != null && Date.now() - prev.at < TTL) { count++; return; } // keep a fuller, fresh reading
+      const series = toSeries(one);
+      store.set(k, { at: Date.now(), lat: p.lat, lon: p.lon, elevation: null, tpi: null, reading: computeReading(series, null), series });
+      count++;
+    });
+  }
+  store.set('packAt', Date.now()); store.set('packCount', count);
+  return { count, at: Date.now() };
+}
+export const packInfo = () => ({ count: store.get('packCount', 0), at: store.get('packAt', 0) });
 
 /** Readings for many points in one request (map). Terrain is skipped to stay light. */
 export async function getManyReadings(points) {
@@ -125,6 +196,9 @@ export async function getManyReadings(points) {
     return out;
   } catch (e) {
     if (cached) return cached.items;
+    // never opened the map online: use readings saved in the offline pack
+    const items = points.map((p) => { const r = store.get('r:' + key(p.lat, p.lon)); if (!r) return null; const x = refresh(r); return { ...p, score: x.reading.score, level: x.reading.level.key }; }).filter(Boolean);
+    if (items.length) return items;
     throw e;
   }
 }
@@ -144,6 +218,8 @@ export async function placeName(lat, lon) {
     store.set(k, out);
     return out;
   } catch {
+    const np = nearestPlace(lat, lon);
+    if (np && np.km < 8) return { name: np.km < 1.5 ? np.name : `Near ${np.name}`, area: np.area };
     return { name: 'Your location', area: `${lat.toFixed(3)}, ${lon.toFixed(3)}` };
   }
 }
@@ -159,18 +235,22 @@ export async function searchPlaces(q) {
     const n = await placeName(lat, lon);
     return [{ name: n.name === 'Your location' ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : n.name, area: `${n.area} · ${lat.toFixed(4)}, ${lon.toFixed(4)}`, lat, lon }];
   }
+  const local = searchLocal(q);
+  if (isOffline()) return local;
   try {
     const p = new URLSearchParams({ q, format: 'jsonv2', countrycodes: 'ug', limit: '8', addressdetails: '1', 'accept-language': 'en' });
     const d = await getJSON(`${NOMINATIM}/search?${p}`);
     if (d.length) {
-      return d.map((x) => {
+      const seen = new Set(local.map((x) => x.name.toLowerCase()));
+      return [...local, ...d.map((x) => {
         const a = x.address || {};
         const name = x.name || x.display_name.split(',')[0];
         const area = [a.city_district, a.county, a.city, a.state_district, a.state].find((v) => v && v !== name) || 'Uganda';
         return { name, area, lat: +x.lat, lon: +x.lon };
-      });
+      }).filter((x) => !seen.has(x.name.toLowerCase()))].slice(0, 10);
     }
-  } catch { /* fall through */ }
+  } catch { if (local.length) return local; }
+  if (local.length) return local;
   const p = new URLSearchParams({ name: q, count: '8', countryCode: 'UG', language: 'en' });
   const d = await getJSON(`${GEOCODE}?${p}`);
   return (d.results || []).map((x) => ({ name: x.name, area: x.admin2 || x.admin1 || 'Uganda', lat: x.latitude, lon: x.longitude }));
